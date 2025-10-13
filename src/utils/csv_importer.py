@@ -212,103 +212,99 @@ def import_associates_from_csv(
         for assoc in existing_associates
     }
 
-    # Process each row
-    processed_associates = []
+    # Process all rows in a single transaction
+    try:
+        # Process each row - First pass: Create/update associates
+        processed_associates = []
 
-    for row in rows:
-        try:
-            # Find level
-            level = level_map.get(row.level.lower())
-            if not level:
-                result.errors.append(
-                    f"Row {row.row_number}: Level '{row.level}' not found. "
-                    f"Available levels: {', '.join(level_map.keys())}"
+        for row in rows:
+            try:
+                # Find level
+                level = level_map.get(row.level.lower())
+                if not level:
+                    result.errors.append(
+                        f"Row {row.row_number}: Level '{row.level}' not found. "
+                        f"Available levels: {', '.join(level_map.keys())}"
+                    )
+                    continue
+
+                # Check if associate already exists
+                associate_key = (row.first_name.lower(), row.last_name.lower())
+                existing_associate = associate_map.get(associate_key)
+
+                if existing_associate:
+                    if update_existing:
+                        # Update existing associate
+                        existing_associate.associate_level_id = level.id
+                        result.updated_count += 1
+                        processed_associates.append(existing_associate)
+                    else:
+                        result.skipped_count += 1
+                        result.warnings.append(
+                            f"Row {row.row_number}: Associate '{row.first_name} {row.last_name}' "
+                            "already exists (skipped)"
+                        )
+                    continue
+
+                # Create new associate (manager will be assigned in second pass)
+                new_associate = Associate(
+                    first_name=row.first_name,
+                    last_name=row.last_name,
+                    associate_level_id=level.id,
+                    is_people_manager=row.is_people_manager  # From CSV, will be set to True if they have direct reports
                 )
-                continue
 
-            # Check if associate already exists
-            associate_key = (row.first_name.lower(), row.last_name.lower())
-            existing_associate = associate_map.get(associate_key)
+                db.add(new_associate)
+                processed_associates.append(new_associate)
+                result.created_count += 1
 
-            if existing_associate:
-                if update_existing:
-                    # Update existing associate
-                    existing_associate.associate_level_id = level.id
-                    result.updated_count += 1
-                    processed_associates.append(existing_associate)
-                else:
-                    result.skipped_count += 1
-                    result.warnings.append(
-                        f"Row {row.row_number}: Associate '{row.first_name} {row.last_name}' "
-                        "already exists (skipped)"
-                    )
-                continue
+                # Update cache
+                associate_map[associate_key] = new_associate
 
-            # Create new associate (manager will be assigned in second pass)
-            new_associate = Associate(
-                first_name=row.first_name,
-                last_name=row.last_name,
-                associate_level_id=level.id,
-                is_people_manager=row.is_people_manager  # From CSV, will be set to True if they have direct reports
-            )
+            except Exception as e:
+                result.errors.append(f"Row {row.row_number}: Error processing - {str(e)}")
 
-            db.add(new_associate)
-            processed_associates.append(new_associate)
-            result.created_count += 1
-
-            # Update cache
-            associate_map[associate_key] = new_associate
-
-        except Exception as e:
-            result.errors.append(f"Row {row.row_number}: Error processing - {str(e)}")
-
-    # Flush to get IDs for new associates
-    try:
+        # Flush to get IDs for new associates
         db.flush()
-    except Exception as e:
-        db.rollback()
-        result.errors.append(f"Database error during flush: {str(e)}")
-        return result
 
-    # Second pass: Assign managers
-    for row in rows:
-        try:
-            # Find the associate we just created/updated
-            associate_key = (row.first_name.lower(), row.last_name.lower())
-            associate = associate_map.get(associate_key)
+        # Second pass: Assign managers
+        for row in rows:
+            try:
+                # Find the associate we just created/updated
+                associate_key = (row.first_name.lower(), row.last_name.lower())
+                associate = associate_map.get(associate_key)
 
-            if not associate:
-                continue  # Already reported error in first pass
+                if not associate:
+                    continue  # Already reported error in first pass
 
-            # Assign manager if specified
-            if row.manager_first_name and row.manager_last_name:
-                manager_key = (row.manager_first_name.lower(), row.manager_last_name.lower())
-                manager = associate_map.get(manager_key)
+                # Assign manager if specified
+                if row.manager_first_name and row.manager_last_name:
+                    manager_key = (row.manager_first_name.lower(), row.manager_last_name.lower())
+                    manager = associate_map.get(manager_key)
 
-                if not manager:
-                    result.warnings.append(
-                        f"Row {row.row_number}: Manager '{row.manager_first_name} "
-                        f"{row.manager_last_name}' not found for '{row.first_name} {row.last_name}'. "
-                        "Ensure manager is defined earlier in the CSV or already exists in database."
-                    )
-                else:
-                    associate.manager_id = manager.id
-                    # Mark manager as people manager
-                    manager.is_people_manager = True
+                    if not manager:
+                        result.warnings.append(
+                            f"Row {row.row_number}: Manager '{row.manager_first_name} "
+                            f"{row.manager_last_name}' not found for '{row.first_name} {row.last_name}'. "
+                            "Ensure manager is defined earlier in the CSV or already exists in database."
+                        )
+                    else:
+                        associate.manager_id = manager.id
+                        # Mark manager as people manager
+                        manager.is_people_manager = True
 
-        except Exception as e:
-            result.errors.append(
-                f"Row {row.row_number}: Error assigning manager - {str(e)}"
-            )
+            except Exception as e:
+                result.errors.append(
+                    f"Row {row.row_number}: Error assigning manager - {str(e)}"
+                )
 
-    # Commit transaction
-    try:
+        # Commit entire transaction
         db.commit()
         result.success = True
     except Exception as e:
         db.rollback()
         result.success = False
-        result.errors.append(f"Database error during commit: {str(e)}")
+        result.errors.append(f"Database error: {str(e)}")
 
     return result
 

@@ -5,7 +5,7 @@ This module provides functions to calculate performance rating distributions.
 """
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from ..models import Associate, AssociateLevel, PerformanceRating, DistributionBucket
 
@@ -238,9 +238,9 @@ def calculate_comprehensive_distribution(db: Session) -> DistributionResult:
     Returns:
         DistributionResult with complete distribution information
     """
-    # Get all associates with their ratings
+    # Get all associates with their ratings (eager load to prevent N+1)
     all_associates = db.execute(
-        select(Associate)
+        select(Associate).options(joinedload(Associate.performance_rating))
     ).scalars().all()
 
     # Separate into categories
@@ -375,7 +375,7 @@ def get_unassigned_ratings(db: Session) -> List[PerformanceRating]:
     """
     query = select(PerformanceRating).where(
         PerformanceRating.distribution_bucket_id.is_(None),
-        PerformanceRating.excluded_from_distribution == False
+        PerformanceRating.excluded_from_distribution.is_(False)
     )
     return list(db.execute(query).scalars().all())
 

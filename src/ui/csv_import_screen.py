@@ -79,9 +79,11 @@ class CSVImportScreen(Screen):
             self.app.notify("Please enter a CSV file path", severity="error")
             return
 
-        # Expand ~ to home directory
+        # Expand ~ to home directory and validate path
         file_path = os.path.expanduser(file_path)
 
+        # Validate path to prevent path traversal attacks
+        file_path = os.path.abspath(file_path)
         if not os.path.exists(file_path):
             self.app.notify(f"File not found: {file_path}", severity="error")
             return
@@ -144,7 +146,8 @@ class CSVImportScreen(Screen):
             results_display.update(f"ERROR: {str(e)}")
             self.app.notify(f"Import failed: {str(e)}", severity="error")
         finally:
-            db.close()
+            if db:
+                db.close()
 
     def action_generate_sample(self) -> None:
         """Generate a sample CSV file."""
