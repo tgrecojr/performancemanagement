@@ -146,6 +146,10 @@ class PerformanceRatingForm(Container):
                 errors.append("Level Indicator must be a valid number")
                 level = 0
 
+        if errors:
+            self.app.notify("\n".join(errors), severity="error", timeout=5)
+            return
+
         # Convert bucket value
         bucket_id = None
         if bucket_value and bucket_value != Select.BLANK:
@@ -153,10 +157,6 @@ class PerformanceRatingForm(Container):
                 bucket_id = int(bucket_value)
             except (ValueError, TypeError):
                 bucket_id = None
-
-        if errors:
-            self.app.notify("\n".join(errors), severity="error", timeout=5)
-            return
 
         # Submit
         rating_id = self.rating.id if self.rating else None

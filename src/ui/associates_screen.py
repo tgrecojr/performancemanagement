@@ -142,8 +142,13 @@ class AssociateForm(Container):
             return
 
         # Parse values
-        level_id = int(level_select.value)
-        manager_id = int(manager_select.value) if manager_select.value != "0" else None
+        try:
+            level_id = int(level_select.value)
+            manager_id = int(manager_select.value) if manager_select.value != "0" else None
+        except (ValueError, TypeError):
+            self.app.notify("Invalid selection values", severity="error", timeout=5)
+            return
+
         is_people_manager = is_manager_select.value == "true"
 
         # Submit
