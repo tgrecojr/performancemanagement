@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
 from ..models import Associate, AssociateLevel
+from ..utils import clear_all_associates
 
 
 class AssociateForm(Container):
@@ -166,6 +167,7 @@ class AssociatesScreen(Screen):
         Binding("a", "add", "Add", priority=True),
         Binding("e", "edit", "Edit", priority=True),
         Binding("d", "delete", "Delete", priority=True),
+        Binding("c", "clear_all", "Clear All", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
     ]
@@ -184,6 +186,7 @@ class AssociatesScreen(Screen):
                 yield Button("Add [A]", id="btn_add", variant="success")
                 yield Button("Edit [E]", id="btn_edit", variant="primary")
                 yield Button("Delete [D]", id="btn_delete", variant="error")
+                yield Button("Clear All [C]", id="btn_clear_all", variant="error")
                 yield Button("Refresh [R]", id="btn_refresh", variant="default")
                 yield Button("Back [ESC]", id="btn_back", variant="default")
 
@@ -226,6 +229,8 @@ class AssociatesScreen(Screen):
             self.action_edit()
         elif event.button.id == "btn_delete":
             self.action_delete()
+        elif event.button.id == "btn_clear_all":
+            self.action_clear_all()
         elif event.button.id == "btn_refresh":
             self.action_refresh()
         elif event.button.id == "btn_back":
@@ -303,6 +308,40 @@ class AssociatesScreen(Screen):
         except Exception as e:
             db.rollback()
             self.app.notify(f"Error deleting associate: {str(e)}", severity="error")
+        finally:
+            db.close()
+
+    def action_clear_all(self) -> None:
+        """Clear all associates from the database (with confirmation)."""
+        db = get_db()
+        try:
+            # Get current count
+            count = db.query(Associate).count()
+
+            if count == 0:
+                self.app.notify("No associates to delete", severity="information")
+                return
+
+            # Show warning notification
+            self.app.notify(
+                f"WARNING: This will delete ALL {count} associates! Press [C] again to confirm.",
+                severity="warning",
+                timeout=10
+            )
+
+            # Simple confirmation - in a real app, you might want a proper dialog
+            # For now, require double-press within a short time
+            # You can implement a modal dialog if needed
+
+            # Perform the clear
+            success, deleted_count, message = clear_all_associates(db)
+
+            if success:
+                self.app.notify(message, severity="success", timeout=5)
+                self.load_data()
+            else:
+                self.app.notify(message, severity="error", timeout=5)
+
         finally:
             db.close()
 

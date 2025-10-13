@@ -1,16 +1,12 @@
 """Distribution Report screen."""
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.containers import Container, Vertical
+from textual.containers import Container, ScrollableContainer
 from textual.widgets import Header, Footer, Button, DataTable, Static
 from textual.binding import Binding
 
 from ..database import get_db
-from ..reports import (
-    get_total_headcount,
-    calculate_rating_distribution_percentages,
-    get_level_distribution_summary,
-)
+from ..reports.distribution_calculator import calculate_comprehensive_distribution
 
 
 class DistributionReportScreen(Screen):
@@ -24,10 +20,10 @@ class DistributionReportScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Performance Rating Distribution Report", classes="screen-title")
             yield Static(
-                "View distribution of performance ratings across the organization",
+                "Comprehensive distribution analysis with exclusions and bucket targets",
                 classes="screen-description",
             )
 
@@ -35,94 +31,176 @@ class DistributionReportScreen(Screen):
                 yield Button("Refresh [R]", id="btn_refresh", variant="default")
                 yield Button("Back [ESC]", id="btn_back", variant="default")
 
-            yield Static("Overall Distribution", classes="report-section-header")
-            yield DataTable(id="overall_table", zebra_stripes=True)
+            # Section 1: Headcount Summary
+            yield Static("Headcount Summary", classes="report-section-header")
+            yield DataTable(id="headcount_table", zebra_stripes=True, show_cursor=False)
 
-            yield Static("Distribution by Level", classes="report-section-header")
-            yield DataTable(id="by_level_table", zebra_stripes=True)
+            # Section 2: Distribution Bucket Analysis
+            yield Static("Distribution Bucket Analysis", classes="report-section-header")
+            yield DataTable(id="buckets_table", zebra_stripes=True, show_cursor=False)
+
+            # Section 3: Individual Rating Distribution (Included)
+            yield Static("Performance Rating Distribution (Included in Calculation)", classes="report-section-header")
+            yield DataTable(id="ratings_table", zebra_stripes=True, show_cursor=False)
+
+            # Section 4: Excluded Associates
+            yield Static("Excluded from Distribution (For Visibility Only)", classes="report-section-header")
+            yield DataTable(id="excluded_table", zebra_stripes=True, show_cursor=False)
 
         yield Footer()
 
     def on_mount(self) -> None:
         """Set up the data tables and load data."""
-        overall_table = self.query_one("#overall_table", DataTable)
-        overall_table.add_columns("Performance Rating", "Count", "Percentage")
+        # Headcount table
+        headcount_table = self.query_one("#headcount_table", DataTable)
+        headcount_table.add_columns("Category", "Count")
 
-        by_level_table = self.query_one("#by_level_table", DataTable)
-        by_level_table.add_columns("Level", "Rating", "Count", "% of Level")
+        # Buckets table
+        buckets_table = self.query_one("#buckets_table", DataTable)
+        buckets_table.add_columns("Bucket", "Count", "Actual %", "Min %", "Max %", "Status")
+
+        # Ratings table
+        ratings_table = self.query_one("#ratings_table", DataTable)
+        ratings_table.add_columns("Rating", "Count", "Percentage")
+
+        # Excluded table
+        excluded_table = self.query_one("#excluded_table", DataTable)
+        excluded_table.add_columns("Category", "Count")
 
         self.load_data()
 
     def load_data(self) -> None:
         """Load distribution data from the database."""
-        overall_table = self.query_one("#overall_table", DataTable)
-        by_level_table = self.query_one("#by_level_table", DataTable)
+        headcount_table = self.query_one("#headcount_table", DataTable)
+        buckets_table = self.query_one("#buckets_table", DataTable)
+        ratings_table = self.query_one("#ratings_table", DataTable)
+        excluded_table = self.query_one("#excluded_table", DataTable)
 
-        overall_table.clear()
-        by_level_table.clear()
+        headcount_table.clear()
+        buckets_table.clear()
+        ratings_table.clear()
+        excluded_table.clear()
 
         db = get_db()
         try:
-            # Overall distribution
-            total = get_total_headcount(db)
-            percentages = calculate_rating_distribution_percentages(db)
+            # Get comprehensive distribution data
+            result = calculate_comprehensive_distribution(db)
 
-            if total == 0:
-                overall_table.add_row("No data", "0", "0.0%")
+            # Section 1: Headcount Summary
+            headcount_table.add_row("Total Associates", str(result.total_associates))
+            headcount_table.add_row(
+                "Top-Level Manager (excluded)",
+                str(result.top_level_manager_count)
+            )
+            headcount_table.add_row(
+                "Excluded Ratings (e.g., 'Too New')",
+                str(result.excluded_rating_count)
+            )
+            headcount_table.add_row("Unrated Associates", str(result.unrated_count))
+            headcount_table.add_row("─" * 40, "─" * 10)
+            headcount_table.add_row(
+                "Included in Distribution",
+                str(result.included_in_distribution_count)
+            )
+
+            # Section 2: Distribution Bucket Analysis
+            if not result.bucket_distributions:
+                buckets_table.add_row("No buckets configured", "-", "-", "-", "-", "-")
             else:
-                # Sort by rating level (would need to join to get level_indicator, for now sort by name)
-                for rating, pct in sorted(percentages.items()):
-                    count = int(total * pct / 100)  # Back-calculate count from percentage
-                    overall_table.add_row(
+                for bucket in result.bucket_distributions:
+                    # Determine status symbol
+                    if bucket.is_within_target:
+                        status = "✓ Within"
+                    elif bucket.is_below_minimum:
+                        status = "↓ Below Min"
+                    else:  # is_above_maximum
+                        status = "↑ Above Max"
+
+                    # Build ratings breakdown string
+                    ratings_str = ", ".join(
+                        f"{rating}: {count}"
+                        for rating, count in sorted(bucket.rating_breakdown.items())
+                    ) if bucket.rating_breakdown else "(none)"
+
+                    buckets_table.add_row(
+                        f"{bucket.bucket_name}\n{ratings_str}",
+                        str(bucket.count),
+                        f"{bucket.percentage:.1f}%",
+                        f"{bucket.min_percentage:.1f}%",
+                        f"{bucket.max_percentage:.1f}%",
+                        status
+                    )
+
+            # Section 3: Individual Rating Distribution (Included)
+            if not result.rating_counts:
+                ratings_table.add_row("No rated associates", "0", "0.0%")
+            else:
+                # Sort by percentage descending
+                for rating, count in sorted(
+                    result.rating_counts.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                ):
+                    pct = result.rating_percentages.get(rating, 0.0)
+                    ratings_table.add_row(
                         rating,
                         str(count),
                         f"{pct:.1f}%"
                     )
 
-                # Add total row
-                overall_table.add_row(
+                # Total row
+                ratings_table.add_row(
+                    "─" * 40,
+                    "─" * 10,
+                    "─" * 15
+                )
+                ratings_table.add_row(
                     "TOTAL",
-                    str(total),
-                    "100.0%",
+                    str(result.included_in_distribution_count),
+                    "100.0%"
                 )
 
-            # Distribution by level
-            level_summary = get_level_distribution_summary(db)
+            # Section 4: Excluded Associates
+            excluded_table.add_row(
+                "Top-Level Manager",
+                str(result.top_level_manager_count)
+            )
 
-            if not level_summary:
-                by_level_table.add_row("No data", "-", "0", "0.0%")
+            if result.excluded_rating_counts:
+                for rating, count in sorted(result.excluded_rating_counts.items()):
+                    excluded_table.add_row(rating, str(count))
             else:
-                # Sort by level indicator
-                for level_desc, data in sorted(level_summary.items(), key=lambda x: x[1]['level_indicator']):
-                    if not data['rating_counts']:
-                        by_level_table.add_row(
-                            level_desc,
-                            "(None)",
-                            str(data['total_associates']),
-                            "-"
+                excluded_table.add_row("(No excluded ratings)", "0")
+
+            excluded_table.add_row("Unrated", str(result.unrated_count))
+
+            # Show validation warnings if any buckets are out of range
+            out_of_range_buckets = [
+                b for b in result.bucket_distributions
+                if not b.is_within_target
+            ]
+            if out_of_range_buckets:
+                warnings = []
+                for bucket in out_of_range_buckets:
+                    if bucket.is_below_minimum:
+                        warnings.append(
+                            f"{bucket.bucket_name}: {bucket.percentage:.1f}% "
+                            f"(below minimum {bucket.min_percentage:.1f}%)"
                         )
                     else:
-                        # Show each rating for this level
-                        first_row = True
-                        for rating, count in sorted(data['rating_counts'].items()):
-                            pct = data['rating_percentages'].get(rating, 0)
-                            by_level_table.add_row(
-                                level_desc if first_row else "",
-                                rating,
-                                str(count),
-                                f"{pct:.1f}%"
-                            )
-                            first_row = False
+                        warnings.append(
+                            f"{bucket.bucket_name}: {bucket.percentage:.1f}% "
+                            f"(above maximum {bucket.max_percentage:.1f}%)"
+                        )
 
-                        # Show unrated count if any
-                        if data['unrated_associates'] > 0:
-                            by_level_table.add_row(
-                                "",
-                                "(Unrated)",
-                                str(data['unrated_associates']),
-                                "-"
-                            )
+                self.app.notify(
+                    "WARNING: Some buckets are outside target ranges:\n" + "\n".join(warnings),
+                    severity="warning",
+                    timeout=10
+                )
 
+        except Exception as e:
+            self.app.notify(f"Error loading distribution data: {str(e)}", severity="error")
         finally:
             db.close()
 
