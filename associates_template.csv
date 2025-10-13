@@ -1,0 +1,5 @@
+first_name,last_name,level,manager_first_name,manager_last_name,is_people_manager
+John,CEO,Executive,,,true
+Jane,Director,Director,John,CEO,true
+Bob,Manager,Manager,Jane,Director,true
+Alice,Employee,Individual Contributor,Bob,Manager,false

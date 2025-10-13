@@ -10,13 +10,15 @@ from textual.widgets import (
     Static,
     Input,
     Label,
+    Checkbox,
+    Select,
 )
 from textual.binding import Binding
 from textual.message import Message
 from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
-from ..models import PerformanceRating
+from ..models import PerformanceRating, DistributionBucket
 
 
 class PerformanceRatingForm(Container):
@@ -30,10 +32,14 @@ class PerformanceRatingForm(Container):
             rating_id: int | None,
             description: str,
             level_indicator: int,
+            excluded_from_distribution: bool,
+            distribution_bucket_id: int | None,
         ) -> None:
             self.rating_id = rating_id
             self.description = description
             self.level_indicator = level_indicator
+            self.excluded_from_distribution = excluded_from_distribution
+            self.distribution_bucket_id = distribution_bucket_id
             super().__init__()
 
     class Cancelled(Message):
@@ -72,6 +78,34 @@ class PerformanceRatingForm(Container):
                 id="input_level_indicator",
             )
 
+            yield Label("Excluded from Distribution:")
+            yield Checkbox(
+                "Exclude this rating from distribution calculations",
+                value=self.rating.excluded_from_distribution if self.rating else False,
+                id="checkbox_excluded",
+            )
+
+            yield Label("Distribution Bucket:")
+            # Get buckets and create options
+            db = get_db()
+            try:
+                buckets = db.query(DistributionBucket).order_by(DistributionBucket.sort_order).all()
+                bucket_options = [("(None)", None)]
+                bucket_options.extend([(bucket.name, str(bucket.id)) for bucket in buckets])
+
+                current_bucket_value = None
+                if self.rating and self.rating.distribution_bucket_id:
+                    current_bucket_value = str(self.rating.distribution_bucket_id)
+
+                yield Select(
+                    bucket_options,
+                    value=current_bucket_value,
+                    allow_blank=True,
+                    id="select_bucket",
+                )
+            finally:
+                db.close()
+
             with Horizontal(classes="form-buttons"):
                 yield Button("Save", variant="primary", id="btn_save")
                 yield Button("Cancel", variant="default", id="btn_cancel")
@@ -87,9 +121,13 @@ class PerformanceRatingForm(Container):
         """Validate and submit the form."""
         description_input = self.query_one("#input_description", Input)
         level_input = self.query_one("#input_level_indicator", Input)
+        excluded_checkbox = self.query_one("#checkbox_excluded", Checkbox)
+        bucket_select = self.query_one("#select_bucket", Select)
 
         description = description_input.value.strip()
         level_str = level_input.value.strip()
+        excluded = excluded_checkbox.value
+        bucket_value = bucket_select.value
 
         # Validation
         errors = []
@@ -108,13 +146,23 @@ class PerformanceRatingForm(Container):
                 errors.append("Level Indicator must be a valid number")
                 level = 0
 
+        # Convert bucket value
+        bucket_id = None
+        if bucket_value and bucket_value != Select.BLANK:
+            try:
+                bucket_id = int(bucket_value)
+            except (ValueError, TypeError):
+                bucket_id = None
+
         if errors:
             self.app.notify("\n".join(errors), severity="error", timeout=5)
             return
 
         # Submit
         rating_id = self.rating.id if self.rating else None
-        self.post_message(self.Submitted(rating_id, description, level))
+        self.post_message(
+            self.Submitted(rating_id, description, level, excluded, bucket_id)
+        )
 
 
 class PerformanceRatingsScreen(Screen):
@@ -152,7 +200,7 @@ class PerformanceRatingsScreen(Screen):
     def on_mount(self) -> None:
         """Set up the data table and load data."""
         table = self.query_one("#ratings_table", DataTable)
-        table.add_columns("ID", "Description", "Level")
+        table.add_columns("ID", "Description", "Level", "Excluded", "Bucket")
         table.focus()
         self.load_data()
 
@@ -165,10 +213,15 @@ class PerformanceRatingsScreen(Screen):
         try:
             ratings = db.query(PerformanceRating).order_by(PerformanceRating.level_indicator).all()
             for rating in ratings:
+                excluded_str = "Yes" if rating.excluded_from_distribution else "No"
+                bucket_str = rating.distribution_bucket.name if rating.distribution_bucket else "(None)"
+
                 table.add_row(
                     str(rating.id),
                     rating.description,
                     str(rating.level_indicator),
+                    excluded_str,
+                    bucket_str,
                     key=str(rating.id),
                 )
         finally:
@@ -281,6 +334,8 @@ class PerformanceRatingsScreen(Screen):
                 if rating:
                     rating.description = message.description
                     rating.level_indicator = message.level_indicator
+                    rating.excluded_from_distribution = message.excluded_from_distribution
+                    rating.distribution_bucket_id = message.distribution_bucket_id
                     action = "Updated"
                 else:
                     self.app.notify("Rating not found", severity="error")
@@ -290,6 +345,8 @@ class PerformanceRatingsScreen(Screen):
                 rating = PerformanceRating(
                     description=message.description,
                     level_indicator=message.level_indicator,
+                    excluded_from_distribution=message.excluded_from_distribution,
+                    distribution_bucket_id=message.distribution_bucket_id,
                 )
                 db.add(rating)
                 action = "Created"

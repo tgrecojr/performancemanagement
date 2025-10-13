@@ -11,6 +11,8 @@ from .associate_levels_screen import AssociateLevelsScreen
 from .associates_screen import AssociatesScreen
 from .distribution_report_screen import DistributionReportScreen
 from .rating_input_screen import RatingInputScreen
+from .distribution_buckets_screen import DistributionBucketsScreen
+from .csv_import_screen import CSVImportScreen
 
 
 class MainMenuScreen(Screen):
@@ -28,12 +30,14 @@ class MainMenuScreen(Screen):
             Static("Configuration", classes="section-header"),
             Vertical(
                 Button("Performance Ratings", id="btn_ratings", variant="primary"),
+                Button("Distribution Buckets", id="btn_buckets", variant="primary"),
                 Button("Associate Levels", id="btn_levels", variant="primary"),
                 Button("Associates", id="btn_associates", variant="primary"),
                 classes="button-group",
             ),
             Static("Data Input", classes="section-header"),
             Vertical(
+                Button("Import Associates (CSV)", id="btn_import_csv", variant="success"),
                 Button("Enter Performance Ratings", id="btn_input_ratings", variant="success"),
                 classes="button-group",
             ),
@@ -50,10 +54,14 @@ class MainMenuScreen(Screen):
         """Handle button presses."""
         if event.button.id == "btn_ratings":
             self.app.push_screen(PerformanceRatingsScreen())
+        elif event.button.id == "btn_buckets":
+            self.app.push_screen(DistributionBucketsScreen())
         elif event.button.id == "btn_levels":
             self.app.push_screen(AssociateLevelsScreen())
         elif event.button.id == "btn_associates":
             self.app.push_screen(AssociatesScreen())
+        elif event.button.id == "btn_import_csv":
+            self.app.push_screen(CSVImportScreen())
         elif event.button.id == "btn_input_ratings":
             self.app.push_screen(RatingInputScreen())
         elif event.button.id == "btn_reports":
