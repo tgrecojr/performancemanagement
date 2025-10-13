@@ -1,0 +1,17 @@
+# Core dependencies
+textual>=0.47.0
+rich>=13.7.0
+pandas>=2.1.0
+pandera>=0.17.0
+click>=8.1.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# Development dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0
+flake8>=6.1.0
+mypy>=1.7.0
