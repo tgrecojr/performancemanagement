@@ -539,9 +539,9 @@ def calculate_manager_distributions(db: Session) -> ManagerDistributionReport:
     # Get all associates who are people managers
     managers = db.execute(
         select(Associate)
-        .where(Associate.is_people_manager == True)
+        .where(Associate.is_people_manager.is_(True))
         .options(joinedload(Associate.direct_reports))
-    ).scalars().all()
+    ).unique().scalars().all()
 
     # Get all buckets for reference
     buckets = db.execute(

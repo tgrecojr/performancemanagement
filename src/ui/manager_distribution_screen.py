@@ -6,7 +6,9 @@ from textual.widgets import Header, Footer, Button, DataTable, Static
 from textual.binding import Binding
 
 from ..database import get_db
+from ..models import DistributionBucket
 from ..reports.distribution_calculator import calculate_manager_distributions
+from sqlalchemy import select
 
 
 class ManagerDistributionScreen(Screen):
@@ -35,15 +37,18 @@ class ManagerDistributionScreen(Screen):
             yield Static("Overall Summary", classes="report-section-header")
             yield DataTable(id="summary_table", zebra_stripes=True, show_cursor=False)
 
-            # Section 2: By Hierarchy Level
+            # Section 2: Distribution by Bucket - Individual Managers
+            yield Static("Manager Distribution by Bucket (%)", classes="report-section-header")
+            yield Static(
+                "Each cell shows the percentage of that manager's direct reports in each bucket",
+                classes="help-text"
+            )
+            yield DataTable(id="managers_table", zebra_stripes=True, show_cursor=False)
+
+            # Section 3: Distribution by Hierarchy Level
             yield Static("Distribution by Hierarchy Level", classes="report-section-header")
             yield Static("Aggregated view by reporting hierarchy (0 = top level)", classes="help-text")
             yield DataTable(id="hierarchy_table", zebra_stripes=True, show_cursor=False)
-
-            # Section 3: Individual Manager Details
-            yield Static("Individual Manager Details", classes="report-section-header")
-            yield Static("Click on a manager to see full details", classes="help-text")
-            yield DataTable(id="managers_table", zebra_stripes=True, show_cursor=True)
 
         yield Footer()
 
@@ -52,28 +57,6 @@ class ManagerDistributionScreen(Screen):
         # Summary table
         summary_table = self.query_one("#summary_table", DataTable)
         summary_table.add_columns("Metric", "Value")
-
-        # Hierarchy table
-        hierarchy_table = self.query_one("#hierarchy_table", DataTable)
-        hierarchy_table.add_columns(
-            "Level",
-            "Managers",
-            "Included\nReports",
-            "Bucket Distribution %",
-            "Status"
-        )
-
-        # Managers table
-        managers_table = self.query_one("#managers_table", DataTable)
-        managers_table.add_columns(
-            "Manager",
-            "Hier.\nLevel",
-            "Assoc.\nLevel",
-            "Total\nReports",
-            "Included",
-            "Bucket Distribution %",
-            "Status"
-        )
 
         self.load_data()
 
@@ -89,6 +72,15 @@ class ManagerDistributionScreen(Screen):
 
         db = get_db()
         try:
+            # Get distribution buckets (ordered)
+            buckets = db.execute(
+                select(DistributionBucket).order_by(DistributionBucket.sort_order)
+            ).scalars().all()
+
+            if not buckets:
+                self.app.notify("No distribution buckets configured", severity="warning")
+                return
+
             # Get manager distribution data
             result = calculate_manager_distributions(db)
 
@@ -109,66 +101,114 @@ class ManagerDistributionScreen(Screen):
                 str(len(managers_with_issues))
             )
 
-            # Section 2: Hierarchy Level Summary
-            if not result.hierarchy_summaries:
-                hierarchy_table.add_row("No data", "-", "-", "-", "-")
-            else:
-                # Sort by hierarchy level
-                for level in sorted(result.hierarchy_summaries.keys()):
-                    summary = result.hierarchy_summaries[level]
-
-                    # Build bucket distribution string
-                    bucket_parts = []
-                    for bucket_name, pct in sorted(summary['bucket_percentages'].items()):
-                        bucket_parts.append(f"{bucket_name}: {pct:.1f}%")
-                    bucket_str = "\n".join(bucket_parts) if bucket_parts else "(no data)"
-
-                    # Determine overall status for this level
-                    # (We'd need to check against targets, but for now just show "OK")
-                    status = "✓ OK"
-
-                    hierarchy_table.add_row(
-                        f"Level {level}",
-                        str(summary['manager_count']),
-                        str(summary['total_included_reports']),
-                        bucket_str,
-                        status
-                    )
-
-            # Section 3: Individual Manager Details
+            # Section 2: Individual Manager Distribution by Bucket
             if not result.manager_details:
-                managers_table.add_row("No managers found", "-", "-", "-", "-", "-", "-")
+                managers_table.add_row("No managers found")
             else:
-                # Sort by hierarchy level, then by name
+                # Build column headers: Manager info + one column per bucket + status
+                columns = ["Manager", "Hier.\nLevel", "Total\nReports", "Incl.\nReports"]
+                for bucket in buckets:
+                    # Add column with bucket name and target range
+                    columns.append(f"{bucket.name}\n({bucket.min_percentage:.0f}-{bucket.max_percentage:.0f}%)")
+                columns.append("Status")
+
+                managers_table.add_columns(*columns)
+
+                # Sort managers by hierarchy level, then by name
                 sorted_managers = sorted(
                     result.manager_details,
                     key=lambda m: (m.hierarchy_level, m.manager_name)
                 )
 
                 for manager in sorted_managers:
-                    # Build bucket distribution string
-                    bucket_parts = []
-                    for bucket_name, pct in sorted(manager.bucket_percentages.items()):
-                        bucket_parts.append(f"{bucket_name}: {pct:.1f}%")
-                    bucket_str = "\n".join(bucket_parts) if bucket_parts else "(no data)"
-
-                    # Determine status
-                    if manager.included_reports == 0:
-                        status = "- No Data"
-                    elif manager.buckets_out_of_range:
-                        status = f"⚠ {len(manager.buckets_out_of_range)} bucket(s) OOR"
-                    else:
-                        status = "✓ Within Targets"
-
-                    managers_table.add_row(
+                    # Build row data
+                    row_data = [
                         manager.manager_name,
                         str(manager.hierarchy_level),
-                        manager.manager_level,
                         str(manager.total_direct_reports),
                         str(manager.included_reports),
-                        bucket_str,
-                        status
-                    )
+                    ]
+
+                    # Add bucket percentages
+                    for bucket in buckets:
+                        pct = manager.bucket_percentages.get(bucket.name, 0.0)
+
+                        # Format with indicator if out of range
+                        if manager.included_reports > 0:
+                            if pct < bucket.min_percentage:
+                                cell_text = f"↓ {pct:.1f}%"
+                            elif pct > bucket.max_percentage:
+                                cell_text = f"↑ {pct:.1f}%"
+                            else:
+                                cell_text = f"{pct:.1f}%"
+                        else:
+                            cell_text = "-"
+
+                        row_data.append(cell_text)
+
+                    # Add status column
+                    if manager.included_reports == 0:
+                        status = "No Data"
+                    elif manager.buckets_out_of_range:
+                        status = f"⚠ {len(manager.buckets_out_of_range)} OOR"
+                    else:
+                        status = "✓ OK"
+                    row_data.append(status)
+
+                    managers_table.add_row(*row_data)
+
+            # Section 3: Hierarchy Level Summary
+            if not result.hierarchy_summaries:
+                hierarchy_table.add_row("No data")
+            else:
+                # Build column headers similar to managers table
+                columns = ["Hierarchy\nLevel", "Managers", "Total\nIncluded"]
+                for bucket in buckets:
+                    columns.append(f"{bucket.name}\n({bucket.min_percentage:.0f}-{bucket.max_percentage:.0f}%)")
+                columns.append("Status")
+
+                hierarchy_table.add_columns(*columns)
+
+                # Sort by hierarchy level
+                for level in sorted(result.hierarchy_summaries.keys()):
+                    summary = result.hierarchy_summaries[level]
+
+                    row_data = [
+                        f"Level {level}",
+                        str(summary['manager_count']),
+                        str(summary['total_included_reports']),
+                    ]
+
+                    # Add bucket percentages
+                    out_of_range_count = 0
+                    for bucket in buckets:
+                        pct = summary['bucket_percentages'].get(bucket.name, 0.0)
+
+                        # Check if out of range
+                        if summary['total_included_reports'] > 0:
+                            if pct < bucket.min_percentage:
+                                cell_text = f"↓ {pct:.1f}%"
+                                out_of_range_count += 1
+                            elif pct > bucket.max_percentage:
+                                cell_text = f"↑ {pct:.1f}%"
+                                out_of_range_count += 1
+                            else:
+                                cell_text = f"{pct:.1f}%"
+                        else:
+                            cell_text = "-"
+
+                        row_data.append(cell_text)
+
+                    # Add status
+                    if summary['total_included_reports'] == 0:
+                        status = "No Data"
+                    elif out_of_range_count > 0:
+                        status = f"⚠ {out_of_range_count} OOR"
+                    else:
+                        status = "✓ OK"
+                    row_data.append(status)
+
+                    hierarchy_table.add_row(*row_data)
 
             # Show notification if managers are out of range
             if managers_with_issues:
