@@ -179,7 +179,7 @@ class PerformanceRatingsScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Performance Ratings Configuration", classes="screen-title")
             yield Static(
                 "Manage performance rating levels (higher level = better performance)",
@@ -242,7 +242,7 @@ class PerformanceRatingsScreen(Screen):
 
     def action_add(self) -> None:
         """Show form to add a new rating."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
 
         # Check if form already exists
         existing_forms = form_container.query("PerformanceRatingForm")
@@ -269,7 +269,7 @@ class PerformanceRatingsScreen(Screen):
                 return
 
             # Check if form already exists
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             existing_forms = form_container.query("PerformanceRatingForm")
             if existing_forms:
                 return
@@ -356,7 +356,7 @@ class PerformanceRatingsScreen(Screen):
             self.load_data()
 
             # Remove the form
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             forms = form_container.query("PerformanceRatingForm")
             for form in forms:
                 form.remove()
@@ -380,7 +380,7 @@ class PerformanceRatingsScreen(Screen):
 
     def on_performance_rating_form_cancelled(self, message: PerformanceRatingForm.Cancelled) -> None:
         """Handle form cancellation."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
         forms = form_container.query("PerformanceRatingForm")
         for form in forms:
             form.remove()

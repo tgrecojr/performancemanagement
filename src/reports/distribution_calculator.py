@@ -437,3 +437,244 @@ def validate_bucket_configuration(db: Session) -> Dict[str, List[str]]:
         'errors': errors,
         'warnings': warnings
     }
+
+
+# Manager Distribution Analysis
+
+
+@dataclass
+class ManagerDistributionDetail:
+    """Distribution details for a single manager."""
+
+    manager_id: int
+    manager_name: str
+    manager_level: str
+    hierarchy_level: int  # Distance from top (0 = top level, 1 = reports to top, etc.)
+
+    # Headcount breakdown
+    total_direct_reports: int
+    rated_reports: int
+    unrated_reports: int
+    excluded_reports: int
+    included_reports: int  # Those included in distribution calculations
+
+    # Rating distributions (for included reports only)
+    rating_counts: Dict[str, int]  # rating_description -> count
+    rating_percentages: Dict[str, float]  # rating_description -> percentage
+
+    # Bucket distributions (for included reports only)
+    bucket_counts: Dict[str, int]  # bucket_name -> count
+    bucket_percentages: Dict[str, float]  # bucket_name -> percentage
+
+    # Status indicators for buckets
+    buckets_out_of_range: List[str]  # List of bucket names that are out of target range
+
+
+@dataclass
+class ManagerDistributionReport:
+    """Complete manager distribution report."""
+
+    # Overall summary across all managers
+    total_managers: int
+    total_associates_under_managers: int
+
+    # Individual manager details
+    manager_details: List[ManagerDistributionDetail]
+
+    # Hierarchy level summaries
+    hierarchy_summaries: Dict[int, Dict]  # hierarchy_level -> summary dict
+
+
+def calculate_hierarchy_level(db: Session, associate: Associate) -> int:
+    """
+    Calculate the hierarchy level of an associate (distance from top).
+
+    0 = Top level (no manager)
+    1 = Reports directly to top level
+    2 = Reports to someone who reports to top level
+    etc.
+
+    Args:
+        db: Database session
+        associate: Associate to calculate level for
+
+    Returns:
+        Hierarchy level (0 = top)
+    """
+    level = 0
+    current = associate
+
+    # Prevent infinite loops in case of circular references
+    seen_ids = set()
+
+    while current.manager_id is not None:
+        if current.manager_id in seen_ids:
+            # Circular reference detected
+            break
+        seen_ids.add(current.id)
+
+        # Get the manager
+        current = db.execute(
+            select(Associate).where(Associate.id == current.manager_id)
+        ).scalar_one()
+        level += 1
+
+    return level
+
+
+def calculate_manager_distributions(db: Session) -> ManagerDistributionReport:
+    """
+    Calculate performance rating distributions across all managers.
+
+    This provides two views:
+    1. Overall: Distribution for each individual manager
+    2. By Hierarchy Level: Aggregated distributions at each level of the org chart
+
+    Args:
+        db: Database session
+
+    Returns:
+        ManagerDistributionReport with comprehensive manager distribution data
+    """
+    # Get all associates who are people managers
+    managers = db.execute(
+        select(Associate)
+        .where(Associate.is_people_manager == True)
+        .options(joinedload(Associate.direct_reports))
+    ).scalars().all()
+
+    # Get all buckets for reference
+    buckets = db.execute(
+        select(DistributionBucket).order_by(DistributionBucket.sort_order)
+    ).scalars().all()
+    bucket_map = {b.id: b for b in buckets}
+
+    manager_details = []
+    hierarchy_data = {}  # hierarchy_level -> list of ManagerDistributionDetail
+
+    for manager in managers:
+        # Calculate manager's hierarchy level
+        hierarchy_level = calculate_hierarchy_level(db, manager)
+
+        # Categorize direct reports
+        total_reports = len(manager.direct_reports)
+        rated_reports = []
+        unrated_reports = []
+        excluded_reports = []
+        included_reports = []
+
+        for report in manager.direct_reports:
+            if report.performance_rating_id is None:
+                unrated_reports.append(report)
+            elif report.performance_rating.excluded_from_distribution:
+                excluded_reports.append(report)
+            else:
+                rated_reports.append(report)
+                included_reports.append(report)
+
+        # Calculate rating distributions (included only)
+        rating_counts = {}
+        for report in included_reports:
+            rating_desc = report.performance_rating.description
+            rating_counts[rating_desc] = rating_counts.get(rating_desc, 0) + 1
+
+        rating_percentages = {}
+        if included_reports:
+            for rating, count in rating_counts.items():
+                rating_percentages[rating] = (count / len(included_reports)) * 100
+
+        # Calculate bucket distributions (included only)
+        bucket_counts = {}
+        for report in included_reports:
+            bucket_id = report.performance_rating.distribution_bucket_id
+            if bucket_id and bucket_id in bucket_map:
+                bucket_name = bucket_map[bucket_id].name
+                bucket_counts[bucket_name] = bucket_counts.get(bucket_name, 0) + 1
+
+        bucket_percentages = {}
+        buckets_out_of_range = []
+        if included_reports:
+            for bucket in buckets:
+                count = bucket_counts.get(bucket.name, 0)
+                percentage = (count / len(included_reports)) * 100
+                bucket_percentages[bucket.name] = percentage
+
+                # Check if out of range
+                if percentage < bucket.min_percentage or percentage > bucket.max_percentage:
+                    if count > 0:  # Only flag if there are actually people in this bucket
+                        buckets_out_of_range.append(bucket.name)
+
+        detail = ManagerDistributionDetail(
+            manager_id=manager.id,
+            manager_name=manager.full_name,
+            manager_level=manager.associate_level.description,
+            hierarchy_level=hierarchy_level,
+            total_direct_reports=total_reports,
+            rated_reports=len(rated_reports),
+            unrated_reports=len(unrated_reports),
+            excluded_reports=len(excluded_reports),
+            included_reports=len(included_reports),
+            rating_counts=rating_counts,
+            rating_percentages=rating_percentages,
+            bucket_counts=bucket_counts,
+            bucket_percentages=bucket_percentages,
+            buckets_out_of_range=buckets_out_of_range
+        )
+
+        manager_details.append(detail)
+
+        # Add to hierarchy data
+        if hierarchy_level not in hierarchy_data:
+            hierarchy_data[hierarchy_level] = []
+        hierarchy_data[hierarchy_level].append(detail)
+
+    # Calculate hierarchy level summaries
+    hierarchy_summaries = {}
+    for level, details in hierarchy_data.items():
+        # Aggregate across all managers at this level
+        total_managers_at_level = len(details)
+        total_included = sum(d.included_reports for d in details)
+
+        # Aggregate rating counts
+        agg_rating_counts = {}
+        for detail in details:
+            for rating, count in detail.rating_counts.items():
+                agg_rating_counts[rating] = agg_rating_counts.get(rating, 0) + count
+
+        # Calculate aggregate percentages
+        agg_rating_percentages = {}
+        if total_included > 0:
+            for rating, count in agg_rating_counts.items():
+                agg_rating_percentages[rating] = (count / total_included) * 100
+
+        # Aggregate bucket counts
+        agg_bucket_counts = {}
+        for detail in details:
+            for bucket, count in detail.bucket_counts.items():
+                agg_bucket_counts[bucket] = agg_bucket_counts.get(bucket, 0) + count
+
+        # Calculate aggregate bucket percentages
+        agg_bucket_percentages = {}
+        if total_included > 0:
+            for bucket, count in agg_bucket_counts.items():
+                agg_bucket_percentages[bucket] = (count / total_included) * 100
+
+        hierarchy_summaries[level] = {
+            'hierarchy_level': level,
+            'manager_count': total_managers_at_level,
+            'total_included_reports': total_included,
+            'rating_counts': agg_rating_counts,
+            'rating_percentages': agg_rating_percentages,
+            'bucket_counts': agg_bucket_counts,
+            'bucket_percentages': agg_bucket_percentages
+        }
+
+    # Calculate overall totals
+    total_associates_under_managers = sum(d.total_direct_reports for d in manager_details)
+
+    return ManagerDistributionReport(
+        total_managers=len(manager_details),
+        total_associates_under_managers=total_associates_under_managers,
+        manager_details=manager_details,
+        hierarchy_summaries=hierarchy_summaries
+    )

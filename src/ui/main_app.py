@@ -10,6 +10,7 @@ from .performance_ratings_screen import PerformanceRatingsScreen
 from .associate_levels_screen import AssociateLevelsScreen
 from .associates_screen import AssociatesScreen
 from .distribution_report_screen import DistributionReportScreen
+from .manager_distribution_screen import ManagerDistributionScreen
 from .rating_input_screen import RatingInputScreen
 from .distribution_buckets_screen import DistributionBucketsScreen
 from .csv_import_screen import CSVImportScreen
@@ -44,6 +45,7 @@ class MainMenuScreen(Screen):
             Static("Reports", classes="section-header"),
             Vertical(
                 Button("Distribution Reports", id="btn_reports", variant="warning"),
+                Button("Manager Distribution Reports", id="btn_manager_reports", variant="warning"),
                 classes="button-group",
             ),
             classes="main-menu",
@@ -66,6 +68,8 @@ class MainMenuScreen(Screen):
             self.app.push_screen(RatingInputScreen())
         elif event.button.id == "btn_reports":
             self.app.push_screen(DistributionReportScreen())
+        elif event.button.id == "btn_manager_reports":
+            self.app.push_screen(ManagerDistributionScreen())
 
 
 class PerformanceManagementApp(App):

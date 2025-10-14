@@ -183,7 +183,7 @@ class DistributionBucketsScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Distribution Buckets Configuration", classes="screen-title")
             yield Static(
                 "Manage performance rating buckets with min/max distribution targets",
@@ -248,7 +248,7 @@ class DistributionBucketsScreen(Screen):
 
     def action_add(self) -> None:
         """Show form to add a new bucket."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
 
         # Check if form already exists
         existing_forms = form_container.query("DistributionBucketForm")
@@ -275,7 +275,7 @@ class DistributionBucketsScreen(Screen):
                 return
 
             # Check if form already exists
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             existing_forms = form_container.query("DistributionBucketForm")
             if existing_forms:
                 return
@@ -391,7 +391,7 @@ class DistributionBucketsScreen(Screen):
             self.load_data()
 
             # Remove the form
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             forms = form_container.query("DistributionBucketForm")
             for form in forms:
                 form.remove()
@@ -415,7 +415,7 @@ class DistributionBucketsScreen(Screen):
         self, message: DistributionBucketForm.Cancelled
     ) -> None:
         """Handle form cancellation."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
         forms = form_container.query("DistributionBucketForm")
         for form in forms:
             form.remove()

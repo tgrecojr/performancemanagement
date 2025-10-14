@@ -180,7 +180,7 @@ class AssociatesScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Associates Configuration", classes="screen-title")
             yield Static(
                 "Manage employees (Note: Performance ratings are assigned separately)",
@@ -243,7 +243,7 @@ class AssociatesScreen(Screen):
 
     def action_add(self) -> None:
         """Show form to add a new associate."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
 
         # Check if form already exists
         existing_forms = form_container.query("AssociateForm")
@@ -270,7 +270,7 @@ class AssociatesScreen(Screen):
                 return
 
             # Check if form already exists
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             existing_forms = form_container.query("AssociateForm")
             if existing_forms:
                 return
@@ -393,7 +393,7 @@ class AssociatesScreen(Screen):
             self.load_data()
 
             # Remove the form
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             forms = form_container.query("AssociateForm")
             for form in forms:
                 form.remove()
@@ -406,7 +406,7 @@ class AssociatesScreen(Screen):
 
     def on_associate_form_cancelled(self, message: AssociateForm.Cancelled) -> None:
         """Handle form cancellation."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
         forms = form_container.query("AssociateForm")
         for form in forms:
             form.remove()
