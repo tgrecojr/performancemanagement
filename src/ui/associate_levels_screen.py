@@ -121,7 +121,7 @@ class AssociateLevelsScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Associate Levels Configuration", classes="screen-title")
             yield Static(
                 "Manage organizational hierarchy levels",
@@ -179,7 +179,7 @@ class AssociateLevelsScreen(Screen):
 
     def action_add(self) -> None:
         """Show form to add a new level."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
 
         # Check if form already exists
         existing_forms = form_container.query("AssociateLevelForm")
@@ -206,7 +206,7 @@ class AssociateLevelsScreen(Screen):
                 return
 
             # Check if form already exists
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             existing_forms = form_container.query("AssociateLevelForm")
             if existing_forms:
                 return
@@ -289,7 +289,7 @@ class AssociateLevelsScreen(Screen):
             self.load_data()
 
             # Remove the form
-            form_container = self.query_one(".screen-container", Container)
+            form_container = self.query_one(".screen-container", ScrollableContainer)
             forms = form_container.query("AssociateLevelForm")
             for form in forms:
                 form.remove()
@@ -313,7 +313,7 @@ class AssociateLevelsScreen(Screen):
 
     def on_associate_level_form_cancelled(self, message: AssociateLevelForm.Cancelled) -> None:
         """Handle form cancellation."""
-        form_container = self.query_one(".screen-container", Container)
+        form_container = self.query_one(".screen-container", ScrollableContainer)
         forms = form_container.query("AssociateLevelForm")
         for form in forms:
             form.remove()

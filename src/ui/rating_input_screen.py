@@ -38,7 +38,7 @@ class RatingInputScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the screen layout."""
         yield Header()
-        with Container(classes="screen-container"):
+        with ScrollableContainer(classes="screen-container"):
             yield Static("Performance Rating Data Input", classes="screen-title")
             yield Static(
                 "Select a level to view and assign performance ratings to associates",
